@@ -1,0 +1,218 @@
+name: "rescript-generated-js-diff"
+description: "Generated a diff of the generated JS files for a PR of a ReScript project"
+author: "https://github.com/zth"
+branding:
+  icon: "archive"
+  color: "purple"
+
+inputs:
+  project_dir:
+    description: "Directory of the ReScript project to scan (where `rescript.json` or `bsconfig.json` is located)"
+    required: true
+  target_branch:
+    description: "Branch to compare against"
+    required: false
+    default: "main"
+    html_artifact_name:
+      description: "Name for the HTML diff artifact (no placeholders). If omitted, a default based on branches will be used."
+      required: false
+      default: ""
+    diff_style:
+      description: "Diff style for diff2html: side or line"
+      required: false
+      default: "side"
+
+outputs:
+  zip_path:
+    description: "Absolute path to the created zip file for the current branch"
+    value: ${{ steps.setup.outputs.zip_path }}
+  diff_html_path:
+    description: "Absolute path to the produced diff HTML (if previous artifact was found)"
+    value: ${{ steps.generate_diff.outputs.diff_html_path }}
+  diff_patch_path:
+    description: "Absolute path to the produced unified diff patch (if previous artifact was found)"
+    value: ${{ steps.generate_diff.outputs.diff_patch_path }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+
+    - name: Install action dependencies
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: npm ci --omit=dev
+
+    - id: setup
+      name: Prepare paths and names
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        CURRENT_BRANCH: ${{ github.ref_name }}
+        INPUT_TARGET_BRANCH: ${{ inputs.target_branch }}
+        GITHUB_BASE_REF: ${{ github.base_ref }}
+      run: |
+        set -euo pipefail
+        BRANCH_NAME="${CURRENT_BRANCH}"
+        # Sanitize branch name for filenames and artifact names
+        BRANCH_SAFE=${BRANCH_NAME//\//-}
+        ZIP_NAME="latest-diff--${BRANCH_SAFE}.zip"
+        OUT_DIR="${RUNNER_TEMP:-$PWD}/rgjd-out"
+        mkdir -p "$OUT_DIR"
+        ZIP_PATH="$OUT_DIR/$ZIP_NAME"
+        echo "branch_name=$BRANCH_NAME" >> "$GITHUB_OUTPUT"
+        echo "branch_safe=$BRANCH_SAFE" >> "$GITHUB_OUTPUT"
+        # Determine target branch: explicit input > PR base > main
+        TARGET_BRANCH="$INPUT_TARGET_BRANCH"
+        if [ -z "$TARGET_BRANCH" ] && [ -n "${GITHUB_BASE_REF:-}" ]; then TARGET_BRANCH="$GITHUB_BASE_REF"; fi
+        if [ -z "$TARGET_BRANCH" ]; then TARGET_BRANCH="main"; fi
+        TARGET_SAFE=${TARGET_BRANCH//\//-}
+        echo "target_branch=$TARGET_BRANCH" >> "$GITHUB_OUTPUT"
+        echo "target_safe=$TARGET_SAFE" >> "$GITHUB_OUTPUT"
+        echo "zip_name=$ZIP_NAME" >> "$GITHUB_OUTPUT"
+        echo "zip_path=$ZIP_PATH" >> "$GITHUB_OUTPUT"
+        # Whether we are on the target branch (skip diffing in that case)
+        if [ "$BRANCH_NAME" = "$TARGET_BRANCH" ]; then
+          echo "is_same_branch=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "is_same_branch=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Build zip
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: node "${{ github.action_path }}/src/RescriptGeneratedJsDiff.res.mjs" save-generated-js "${{ inputs.project_dir }}" "${{ steps.setup.outputs.zip_path }}"
+
+    - name: Upload current zip artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.setup.outputs.zip_name }}
+        path: ${{ steps.setup.outputs.zip_path }}
+        if-no-files-found: error
+
+    - name: Download previous artifact for target branch
+      id: download_prev
+      if: ${{ steps.setup.outputs.is_same_branch != 'true' }}
+      uses: dawidd6/action-download-artifact@v6
+      with:
+        github_token: ${{ github.token }}
+        branch: ${{ steps.setup.outputs.target_branch }}
+        name: latest-diff--${{ steps.setup.outputs.target_safe }}.zip
+        path: .rgjd-cache/prev
+        workflow_conclusion: success
+      continue-on-error: true
+
+    - id: prev_info
+      name: Locate previous zip
+      if: ${{ steps.setup.outputs.is_same_branch != 'true' }}
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        set -euo pipefail
+        PREV_ZIP=$(find .rgjd-cache/prev -type f -name "*.zip" -print -quit || true)
+        if [ -z "$PREV_ZIP" ]; then
+          echo "found=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        echo "found=true" >> "$GITHUB_OUTPUT"
+        echo "zip_path=$(realpath "$PREV_ZIP")" >> "$GITHUB_OUTPUT"
+
+    - id: generate_diff
+      name: Generate diff HTML
+      if: ${{ steps.setup.outputs.is_same_branch != 'true' && steps.prev_info.outputs.found == 'true' }}
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        INPUT_DIFF_STYLE: ${{ inputs.diff_style }}
+      run: |
+        set -euo pipefail
+        CURR_ZIP="${{ steps.setup.outputs.zip_path }}"
+        PREV_ZIP="${{ steps.prev_info.outputs.zip_path }}"
+        WORK="${RUNNER_TEMP:-$PWD}/rgjd-work"
+        mkdir -p "$WORK/prev" "$WORK/curr"
+        # Unzip both to directories
+        unzip -q "$PREV_ZIP" -d "$WORK/prev"
+        unzip -q "$CURR_ZIP" -d "$WORK/curr"
+        # Produce unified diff
+        diff -ruN "$WORK/prev" "$WORK/curr" > "$WORK/diff.patch" || true
+        # If diff is empty, skip HTML generation
+        if [ ! -s "$WORK/diff.patch" ]; then
+          echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        # Generate HTML via diff2html-cli (side-by-side)
+        STYLE=$(echo "$INPUT_DIFF_STYLE" | tr 'A-Z' 'a-z')
+        if [ "$STYLE" != "side" ] && [ "$STYLE" != "line" ]; then STYLE="side"; fi
+        npx --yes diff2html-cli@5 -i file -s "$STYLE" -F "$WORK/diff.html" -- "$WORK/diff.patch"
+        echo "diff_html_path=$WORK/diff.html" >> "$GITHUB_OUTPUT"
+        echo "diff_patch_path=$WORK/diff.patch" >> "$GITHUB_OUTPUT"
+        echo "has_changes=true" >> "$GITHUB_OUTPUT"
+
+    - id: compute_html_artifact_name
+      name: Compute HTML artifact name
+      if: ${{ steps.setup.outputs.is_same_branch != 'true' && steps.prev_info.outputs.found == 'true' && steps.generate_diff.outputs.has_changes == 'true' }}
+      shell: bash
+      env:
+        IN_NAME: ${{ inputs.html_artifact_name }}
+        CURR: ${{ steps.setup.outputs.branch_name }}
+        CURR_SAFE: ${{ steps.setup.outputs.branch_safe }}
+        TGT: ${{ steps.setup.outputs.target_branch }}
+        TGT_SAFE: ${{ steps.setup.outputs.target_safe }}
+      run: |
+        set -euo pipefail
+        NAME="$IN_NAME"
+        if [ -z "$NAME" ]; then
+          NAME="rescript-generated-js-diff--${TGT_SAFE}-vs-${CURR_SAFE}.html"
+        fi
+        echo "html_name=$NAME" >> "$GITHUB_OUTPUT"
+        PATCH_NAME="$NAME"
+        if [[ "$PATCH_NAME" == *.html ]]; then
+          PATCH_NAME="${PATCH_NAME%.html}.patch"
+        else
+          PATCH_NAME="${PATCH_NAME}.patch"
+        fi
+        echo "patch_name=$PATCH_NAME" >> "$GITHUB_OUTPUT"
+
+    - name: Upload diff HTML artifact
+      if: ${{ steps.setup.outputs.is_same_branch != 'true' && steps.prev_info.outputs.found == 'true' && steps.generate_diff.outputs.has_changes == 'true' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.compute_html_artifact_name.outputs.html_name }}
+        path: ${{ steps.generate_diff.outputs.diff_html_path }}
+        if-no-files-found: error
+
+    - name: Upload diff patch artifact
+      if: ${{ steps.setup.outputs.is_same_branch != 'true' && steps.prev_info.outputs.found == 'true' && steps.generate_diff.outputs.has_changes == 'true' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.compute_html_artifact_name.outputs.patch_name }}
+        path: ${{ steps.generate_diff.outputs.diff_patch_path }}
+        if-no-files-found: error
+
+    - name: Add job summary
+      shell: bash
+      env:
+        BRANCH: ${{ steps.setup.outputs.branch_name }}
+        TARGET: ${{ steps.setup.outputs.target_branch }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      run: |
+        {
+          echo "### rescript-generated-js-diff"
+          echo
+          echo "- Current branch: \`$BRANCH\`"
+          echo "- Target branch: \`$TARGET\`"
+          echo "- Saved generated JS artifact: \`${{ steps.setup.outputs.zip_name }}\`"
+          if [ "${{ steps.setup.outputs.is_same_branch }}" = "true" ]; then
+            echo "- On target branch; diff generation skipped."
+          elif [ "${{ steps.prev_info.outputs.found }}" != "true" ]; then
+            echo "- No previous artifact found for target branch; diff HTML was not generated."
+          elif [ "${{ steps.generate_diff.outputs.has_changes }}" != "true" ]; then
+            echo "- No changes detected; diff HTML was not generated."
+          else
+            echo "- Diff HTML artifact uploaded"
+            echo "- Open artifacts: [run artifacts]($RUN_URL)"
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"

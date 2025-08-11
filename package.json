@@ -1,0 +1,19 @@
+{
+  "name": "rescript-generated-js-diff",
+  "version": "0.0.0",
+  "scripts": {
+    "res:build": "rescript",
+    "res:clean": "rescript clean",
+    "res:dev": "rescript watch"
+  },
+  "keywords": [
+    "rescript"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "archiver": "^7.0.1",
+    "fast-glob": "^3.3.3",
+    "rescript": "^12.0.0-beta.5"
+  }
+}

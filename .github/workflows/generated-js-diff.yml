@@ -1,0 +1,44 @@
+name: Generated JS diff
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+    branches:
+      - "**"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  build-and-diff:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build ReScript project
+        run: npm run res:build
+
+      - name: Run rescript-generated-js-diff action
+        id: rgjd
+        uses: ./
+        with:
+          target_branch: main
+          diff_style: side
+
+      - name: Output paths
+        run: |
+          echo "Zip: ${{ steps.rgjd.outputs.zip_path }}"
+          echo "Diff HTML: ${{ steps.rgjd.outputs.diff_html_path }}"
+          echo "Diff patch: ${{ steps.rgjd.outputs.diff_patch_path }}"
