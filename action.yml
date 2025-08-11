@@ -13,14 +13,14 @@ inputs:
     description: "Branch to compare against"
     required: false
     default: "main"
-    html_artifact_name:
-      description: "Name for the HTML diff artifact (no placeholders). If omitted, a default based on branches will be used."
-      required: false
-      default: ""
-    diff_style:
-      description: "Diff style for diff2html: side or line"
-      required: false
-      default: "side"
+  html_artifact_name:
+    description: "Name for the HTML diff artifact (no placeholders). If omitted, a default based on branches will be used."
+    required: false
+    default: ""
+  diff_style:
+    description: "Diff style for diff2html: side or line"
+    required: false
+    default: "side"
 
 outputs:
   zip_path:
