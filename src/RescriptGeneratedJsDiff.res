@@ -133,7 +133,7 @@ let procudeDiffZip = async (~baseDirArg, ~outArg) => {
 
   switch uniqueSorted(files) {
   | [] =>
-    Console.error(`No files with suffix "${suffix}" found in configured sources.`)
+    Console.error(`No files with suffix "${suffix}" (??) found in configured sources.`)
     exit(1)
   | files =>
     let resolvedOutPath = switch outArg {
@@ -144,7 +144,7 @@ let procudeDiffZip = async (~baseDirArg, ~outArg) => {
     ensureParentDir(resolvedOutPath)
     switch await createZip(~baseDir, ~filesAbs=files, ~outPath=resolvedOutPath) {
     | exception _ =>
-      Console.error(`Failed to create zip file.`)
+      Console.error(`Failed to create zip file!`)
       exit(1)
     | _ => ()
     }
