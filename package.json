@@ -4,7 +4,8 @@
   "scripts": {
     "res:build": "rescript",
     "res:clean": "rescript clean",
-    "res:dev": "rescript watch"
+    "res:dev": "rescript watch",
+    "example:diff": "bash ./scripts/example_diff.sh"
   },
   "keywords": [
     "rescript"

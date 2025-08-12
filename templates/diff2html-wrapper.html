@@ -5,12 +5,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex, nofollow, noarchive" />
     <meta name="referrer" content="no-referrer" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#e6484f" />
     <title>Diff</title>
 
-    <!-- Optional: a baseline highlight.js theme before diff2html css -->
+    <!-- highlight.js theme (dark, closer to Playground look) -->
     <link
       rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css"
+    />
+
+    <!-- Optional: highlight.js runtime (diff2html will call highlight if available) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+
+    <!-- ReScript website typography (Inter) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
     />
 
     <!--diff2html-css-->
@@ -22,17 +35,193 @@
         //diff2html-fileListToggle
         //diff2html-synchronisedScroll
         //diff2html-highlightCode
+        //diff2html-fileContentToggle
+        //diff2html-stickyFileHeaders
       });
     </script>
     <style>
+      /* Playground-leaning palette (dark-first) */
+      :root {
+        --rs-accent: #e6484f;
+        --rs-accent-600: #cc3e45;
+        --rs-bg: #0f1228; /* page background */
+        --rs-fg: #dbe1f8; /* primary text */
+        --rs-muted: #9aa4c7; /* secondary text */
+        --rs-surface: #141a35; /* panels */
+        --rs-border: #273049; /* subtle borders */
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          --rs-bg: #ffffff;
+          --rs-fg: #24292f;
+          --rs-muted: #57606a;
+          --rs-surface: #f6f8fa;
+          --rs-border: #d0d7de;
+        }
+      }
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+      html {
+        font-size: 14px;
+      }
       body {
-        margin: 16px;
+        margin: 0;
+        line-height: 1.5;
+        color: var(--rs-fg);
+        background: var(--rs-bg);
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          Roboto, "Noto Sans", "Helvetica Neue", Arial, "Apple Color Emoji",
+          "Segoe UI Emoji";
+      }
+      code,
+      pre,
+      tt {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas,
+          "Liberation Mono", "Noto Sans Mono", monospace;
+        font-size: 12px;
+      }
+      a {
+        color: var(--rs-accent);
+      }
+      .rs-header {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background: linear-gradient(
+            180deg,
+            rgba(255, 255, 255, 0.04),
+            rgba(0, 0, 0, 0)
+          ),
+          var(--rs-bg);
+        backdrop-filter: saturate(120%) blur(6px);
+      }
+      .rs-header-inner {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 22px 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .rs-logo {
+        height: 28px;
+        display: block;
+      }
+      .rs-title {
+        font-weight: 700;
+        font-size: 20px;
+        letter-spacing: 0.2px;
+        text-align: center;
+      }
+      .rs-subtitle {
+        color: var(--rs-muted);
+        font-size: 12px;
+      }
+      .rs-actions {
+        display: none;
+      }
+      .rs-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 10px;
+        border: 1px solid var(--rs-border);
+        border-radius: 999px;
+        font-size: 12px;
+        color: var(--rs-muted);
+        background: transparent;
+      }
+      .rs-chip input[type="checkbox"] {
+        accent-color: var(--rs-accent);
+      }
+      .rs-main {
+        max-width: 1400px;
+        margin: 20px auto;
+        padding: 0 20px 24px;
+      }
+      .rs-surface {
+        background: var(--rs-surface);
+        border: 1px solid var(--rs-border);
+        border-radius: 8px;
+        padding: 12px;
+      }
+
+      /* diff2html tweaks to better match Playground aesthetics */
+      .d2h-wrapper {
+        background: transparent;
+      }
+      .d2h-file-wrapper {
+        background: transparent;
+        border: 1px solid var(--rs-border);
+        border-radius: 10px;
+        overflow: hidden;
+      }
+      .d2h-file-header {
+        background: rgba(255, 255, 255, 0.02);
+        border-bottom: 1px solid var(--rs-border);
+        padding: 10px 12px;
+      }
+      .d2h-file-name {
+        color: var(--rs-muted);
+        font-weight: 500;
+      }
+      /* Make the per-file "Viewed" checkbox visible and styled */
+      .d2h-file-collapse {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-left: 10px;
+        padding: 2px 8px;
+        border: 1px solid var(--rs-border);
+        border-radius: 6px;
+        color: var(--rs-muted);
+        background: transparent;
+      }
+      .d2h-file-collapse-input {
+        accent-color: var(--rs-accent);
+      }
+      .d2h-diff-table {
+        background: transparent;
+        font-size: 12px;
+      }
+      .d2h-code-line-prefix {
+        color: var(--rs-muted);
+      }
+      .d2h-code-line-ctn {
+        color: var(--rs-fg);
+      }
+      .d2h-ins .d2h-code-line-ctn {
+        background: rgba(46, 160, 67, 0.18);
+      }
+      .d2h-del .d2h-code-line-ctn {
+        background: rgba(248, 81, 73, 0.2);
       }
     </style>
   </head>
   <body>
-    <div id="diff">
-      <!--diff2html-diff-->
-    </div>
+    <header class="rs-header">
+      <div class="rs-header-inner">
+        <img
+          class="rs-logo"
+          src="https://rescript-lang.org/static/nav-logo-full@2x.png"
+          alt="ReScript"
+        />
+        <span class="rs-title">Diff of generated JS</span>
+      </div>
+    </header>
+    <main class="rs-main">
+      <div class="rs-surface">
+        <div id="diff">
+          <!--diff2html-diff-->
+        </div>
+      </div>
+    </main>
   </body>
 </html>

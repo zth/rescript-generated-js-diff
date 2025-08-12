@@ -13,37 +13,41 @@ CURR_ZIP="$1"
 PREV_ZIP="$2"
 
 WORK="${RUNNER_TEMP:-$PWD}/rgjd-work"
-mkdir -p "$WORK/prev" "$WORK/curr"
+# Use branch-safe names as directory labels so diff2html can display `{target → current}`
+mkdir -p "$WORK/$TGT_SAFE" "$WORK/$CURR_SAFE"
 
-unzip -q "$PREV_ZIP" -d "$WORK/prev"
-unzip -q "$CURR_ZIP" -d "$WORK/curr"
+unzip -q "$PREV_ZIP" -d "$WORK/$TGT_SAFE"
+unzip -q "$CURR_ZIP" -d "$WORK/$CURR_SAFE"
 
+RAW_PATCH="$WORK/diff.raw.patch"
 (
   cd "$WORK"
   git -c core.quotepath=false -c color.ui=never diff --no-index \
-    prev curr > diff.patch || true
+    "$TGT_SAFE" "$CURR_SAFE" > "$RAW_PATCH" || true
 )
 
-if [ ! -s "$WORK/diff.patch" ]; then
+if [ ! -s "$RAW_PATCH" ]; then
   echo "has_changes=false" >> "$GITHUB_OUTPUT"
   exit 0
 fi
 
-# Strip prev/ and curr/ prefixes from headers for repo-relative paths
+# Produce a cleaned patch for artifacts by stripping the first path component
+# after a/ and b/ so paths are repo-relative (independent of the labels used).
+CLEAN_PATCH="$WORK/diff.patch"
 TMP_DIFF="$WORK/diff.tmp.patch"
 sed -E \
-  -e 's|^(diff --git )a/prev/|\1a/|' \
-  -e 's| b/curr/| b/|' \
-  -e 's|^--- a/prev/|--- a/|' \
-  -e 's|^\+\+\+ b/curr/|+++ b/|' \
-  -e 's|^rename from prev/|rename from |' \
-  -e 's|^rename to curr/|rename to |' \
+  -e 's|^(diff --git )a/[^/]+/|\1a/|' \
+  -e 's| b/[^/]+/| b/|' \
+  -e 's|^--- a/[^/]+/|--- a/|' \
+  -e 's|^\+\+\+ b/[^/]+/|+++ b/|' \
+  -e 's|^rename from [^/]+/|rename from |' \
+  -e 's|^rename to [^/]+/|rename to |' \
   -e 's|^(diff --git )a/|\1|' \
   -e 's| b/| |' \
   -e 's|^--- a/|--- |' \
   -e 's|^\+\+\+ b/|+++ |' \
-  "$WORK/diff.patch" > "$TMP_DIFF" || true
-mv "$TMP_DIFF" "$WORK/diff.patch"
+  "$RAW_PATCH" > "$TMP_DIFF" || true
+mv "$TMP_DIFF" "$CLEAN_PATCH"
 
 STYLE=$(echo "${INPUT_DIFF_STYLE:-side}" | tr 'A-Z' 'a-z')
 if [ "$STYLE" != "side" ] && [ "$STYLE" != "line" ]; then STYLE="side"; fi
@@ -65,8 +69,8 @@ OUT_PATCH="$WORK/$PATCH_NAME"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WRAPPER_TEMPLATE="${SCRIPT_DIR}/../templates/diff2html-wrapper.html"
-npx --yes diff2html-cli@5 -i file -s "$STYLE" -F "$OUT_HTML" --hwt "$WRAPPER_TEMPLATE" -- "$WORK/diff.patch"
-mv "$WORK/diff.patch" "$OUT_PATCH"
+npx --yes diff2html-cli@5 -i file -s "$STYLE" -F "$OUT_HTML" --hwt "$WRAPPER_TEMPLATE" -- "$RAW_PATCH"
+mv "$CLEAN_PATCH" "$OUT_PATCH"
 
 
 echo "diff_html_path=$OUT_HTML" >> "$GITHUB_OUTPUT"
