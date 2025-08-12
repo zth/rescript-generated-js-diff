@@ -54,9 +54,11 @@ runs:
         CURRENT_BRANCH: ${{ github.ref_name }}
         INPUT_TARGET_BRANCH: ${{ inputs.target_branch }}
         GITHUB_BASE_REF: ${{ github.base_ref }}
+        GITHUB_HEAD_REF: ${{ github.head_ref }}
       run: |
         set -euo pipefail
         BRANCH_NAME="${CURRENT_BRANCH}"
+        if [ -n "${GITHUB_HEAD_REF:-}" ]; then BRANCH_NAME="$GITHUB_HEAD_REF"; fi
         # Sanitize branch name for filenames and artifact names
         BRANCH_SAFE=${BRANCH_NAME//\//-}
         ZIP_NAME="latest-diff--${BRANCH_SAFE}.zip"
@@ -127,6 +129,9 @@ runs:
       working-directory: ${{ github.workspace }}
       env:
         INPUT_DIFF_STYLE: ${{ inputs.diff_style }}
+        IN_NAME: ${{ inputs.html_artifact_name }}
+        CURR_SAFE: ${{ steps.setup.outputs.branch_safe }}
+        TGT_SAFE: ${{ steps.setup.outputs.target_safe }}
       run: |
         set -euo pipefail
         CURR_ZIP="${{ steps.setup.outputs.zip_path }}"
@@ -146,49 +151,41 @@ runs:
         # Generate HTML via diff2html-cli (side-by-side)
         STYLE=$(echo "$INPUT_DIFF_STYLE" | tr 'A-Z' 'a-z')
         if [ "$STYLE" != "side" ] && [ "$STYLE" != "line" ]; then STYLE="side"; fi
-        npx --yes diff2html-cli@5 -i file -s "$STYLE" -F "$WORK/diff.html" -- "$WORK/diff.patch"
-        echo "diff_html_path=$WORK/diff.html" >> "$GITHUB_OUTPUT"
-        echo "diff_patch_path=$WORK/diff.patch" >> "$GITHUB_OUTPUT"
-        echo "has_changes=true" >> "$GITHUB_OUTPUT"
-
-    - id: compute_html_artifact_name
-      name: Compute HTML artifact name
-      if: ${{ steps.setup.outputs.is_same_branch != 'true' && steps.prev_info.outputs.found == 'true' && steps.generate_diff.outputs.has_changes == 'true' }}
-      shell: bash
-      env:
-        IN_NAME: ${{ inputs.html_artifact_name }}
-        CURR: ${{ steps.setup.outputs.branch_name }}
-        CURR_SAFE: ${{ steps.setup.outputs.branch_safe }}
-        TGT: ${{ steps.setup.outputs.target_branch }}
-        TGT_SAFE: ${{ steps.setup.outputs.target_safe }}
-      run: |
-        set -euo pipefail
         NAME="$IN_NAME"
         if [ -z "$NAME" ]; then
-          NAME="rescript-generated-js-diff--${TGT_SAFE}-vs-${CURR_SAFE}.html"
+          NAME="latest-diff--${TGT_SAFE}-vs-${CURR_SAFE}.html"
         fi
-        echo "html_name=$NAME" >> "$GITHUB_OUTPUT"
         PATCH_NAME="$NAME"
         if [[ "$PATCH_NAME" == *.html ]]; then
           PATCH_NAME="${PATCH_NAME%.html}.patch"
         else
           PATCH_NAME="${PATCH_NAME}.patch"
         fi
+        OUT_HTML="$WORK/$NAME"
+        OUT_PATCH="$WORK/$PATCH_NAME"
+        npx --yes diff2html-cli@5 -i file -s "$STYLE" -F "$OUT_HTML" -- "$WORK/diff.patch"
+        mv "$WORK/diff.patch" "$OUT_PATCH"
+        echo "diff_html_path=$OUT_HTML" >> "$GITHUB_OUTPUT"
+        echo "diff_patch_path=$OUT_PATCH" >> "$GITHUB_OUTPUT"
+        echo "html_name=$NAME" >> "$GITHUB_OUTPUT"
         echo "patch_name=$PATCH_NAME" >> "$GITHUB_OUTPUT"
+        echo "has_changes=true" >> "$GITHUB_OUTPUT"
 
-    - name: Upload diff HTML artifact
+    - id: upload_html
+      name: Upload diff HTML artifact
       if: ${{ steps.setup.outputs.is_same_branch != 'true' && steps.prev_info.outputs.found == 'true' && steps.generate_diff.outputs.has_changes == 'true' }}
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ steps.compute_html_artifact_name.outputs.html_name }}
+        name: ${{ steps.generate_diff.outputs.html_name }}
         path: ${{ steps.generate_diff.outputs.diff_html_path }}
         if-no-files-found: error
 
-    - name: Upload diff patch artifact
+    - id: upload_patch
+      name: Upload diff patch artifact
       if: ${{ steps.setup.outputs.is_same_branch != 'true' && steps.prev_info.outputs.found == 'true' && steps.generate_diff.outputs.has_changes == 'true' }}
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ steps.compute_html_artifact_name.outputs.patch_name }}
+        name: ${{ steps.generate_diff.outputs.patch_name }}
         path: ${{ steps.generate_diff.outputs.diff_patch_path }}
         if-no-files-found: error
 
@@ -198,6 +195,8 @@ runs:
         BRANCH: ${{ steps.setup.outputs.branch_name }}
         TARGET: ${{ steps.setup.outputs.target_branch }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        HTML_ART_ID: ${{ steps.upload_html.outputs.artifact-id }}
+        PATCH_ART_ID: ${{ steps.upload_patch.outputs.artifact-id }}
       run: |
         {
           echo "### rescript-generated-js-diff"
@@ -214,5 +213,17 @@ runs:
           else
             echo "- Diff HTML artifact uploaded"
             echo "- Open artifacts: [run artifacts]($RUN_URL)"
+            HTML_URL="$RUN_URL/artifacts/$HTML_ART_ID"
+            PATCH_URL="$RUN_URL/artifacts/$PATCH_ART_ID"
+            echo "- Diff HTML: [open]($HTML_URL)"
+            echo "- Patch: [open]($PATCH_URL)"
+            echo
+            echo "<details><summary>Inline unified diff (first 200 KB, truncated)</summary>"
+            echo
+            echo '```diff'
+            head -c 200000 "${{ steps.generate_diff.outputs.diff_patch_path }}" || true
+            echo
+            echo '```'
+            echo "</details>"
           fi
         } >> "$GITHUB_STEP_SUMMARY"
