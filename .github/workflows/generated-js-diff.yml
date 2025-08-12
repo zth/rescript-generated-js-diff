@@ -89,7 +89,8 @@ jobs:
 
       - name: Output deployed path
         if: steps.check_diff.outputs.has_diff == 'true'
-        run: echo "Diff path: /${{ steps.compute.outputs.subpath }}"
+        run: |
+          echo "Diff path: /${{ steps.compute.outputs.subpath }}"
 
       - name: Sticky PR comment with latest diff
         if: github.event_name == 'pull_request' && steps.check_diff.outputs.has_diff == 'true'
