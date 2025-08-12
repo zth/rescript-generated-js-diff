@@ -138,17 +138,33 @@ runs:
         PREV_ZIP="${{ steps.prev_info.outputs.zip_path }}"
         WORK="${RUNNER_TEMP:-$PWD}/rgjd-work"
         mkdir -p "$WORK/prev" "$WORK/curr"
-        # Unzip both to directories
+
         unzip -q "$PREV_ZIP" -d "$WORK/prev"
         unzip -q "$CURR_ZIP" -d "$WORK/curr"
-        # Produce unified diff
-        diff -ruN "$WORK/prev" "$WORK/curr" > "$WORK/diff.patch" || true
-        # If diff is empty, skip HTML generation
+
+        # Run from within $WORK so paths are relative (e.g., src/Foo.res.mjs) and avoid runner absolute paths
+        (
+          cd "$WORK"
+          git -c core.quotepath=false -c color.ui=never diff --no-index \
+            prev curr > diff.patch || true
+        )
+
         if [ ! -s "$WORK/diff.patch" ]; then
           echo "has_changes=false" >> "$GITHUB_OUTPUT"
           exit 0
         fi
-        # Generate HTML via diff2html-cli (side-by-side)
+        # Strip the leading prev/ and curr/ path segments so headers show just repo-relative paths like src/Foo.res.mjs
+        TMP_DIFF="$WORK/diff.tmp.patch"
+        sed -E \
+          -e 's|^(diff --git )a/prev/|\1a/|' \
+          -e 's| b/curr/| b/|' \
+          -e 's|^--- a/prev/|--- a/|' \
+          -e 's|^\+\+\+ b/curr/|+++ b/|' \
+          -e 's|^rename from prev/|rename from |' \
+          -e 's|^rename to curr/|rename to |' \
+          "$WORK/diff.patch" > "$TMP_DIFF" || true
+        mv "$TMP_DIFF" "$WORK/diff.patch"
+
         STYLE=$(echo "$INPUT_DIFF_STYLE" | tr 'A-Z' 'a-z')
         if [ "$STYLE" != "side" ] && [ "$STYLE" != "line" ]; then STYLE="side"; fi
         NAME="$IN_NAME"
@@ -199,11 +215,8 @@ runs:
         PATCH_ART_ID: ${{ steps.upload_patch.outputs.artifact-id }}
       run: |
         {
-          echo "### rescript-generated-js-diff"
+          echo "### Diff of generated JS for \`$BRANCH\` vs \`$TARGET\`"
           echo
-          echo "- Current branch: \`$BRANCH\`"
-          echo "- Target branch: \`$TARGET\`"
-          echo "- Saved generated JS artifact: \`${{ steps.setup.outputs.zip_name }}\`"
           if [ "${{ steps.setup.outputs.is_same_branch }}" = "true" ]; then
             echo "- On target branch; diff generation skipped."
           elif [ "${{ steps.prev_info.outputs.found }}" != "true" ]; then
@@ -211,19 +224,14 @@ runs:
           elif [ "${{ steps.generate_diff.outputs.has_changes }}" != "true" ]; then
             echo "- No changes detected; diff HTML was not generated."
           else
-            echo "- Diff HTML artifact uploaded"
-            echo "- Open artifacts: [run artifacts]($RUN_URL)"
             HTML_URL="$RUN_URL/artifacts/$HTML_ART_ID"
             PATCH_URL="$RUN_URL/artifacts/$PATCH_ART_ID"
             echo "- Diff HTML: [open]($HTML_URL)"
-            echo "- Patch: [open]($PATCH_URL)"
-            echo
-            echo "<details><summary>Inline unified diff (first 200 KB, truncated)</summary>"
+            echo "- Patch file: [open]($PATCH_URL)"
             echo
             echo '```diff'
             head -c 200000 "${{ steps.generate_diff.outputs.diff_patch_path }}" || true
             echo
             echo '```'
-            echo "</details>"
           fi
         } >> "$GITHUB_STEP_SUMMARY"
