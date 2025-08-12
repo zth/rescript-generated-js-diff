@@ -11,3 +11,5 @@ type config = {
 }
 
 @send external sync: (t, string, config) => array<string> = "sync"
+
+let thisShouldShow = "this here should show in the diff"

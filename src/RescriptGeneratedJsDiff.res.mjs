@@ -150,14 +150,14 @@ async function procudeDiffZip(baseDirArg, outArg) {
     try {
       await createZip(baseDir, files$1, resolvedOutPath);
     } catch (exn) {
-      console.error("Failed to create zip file.");
+      console.error("Failed to create zip file!");
       process.exit(1);
     }
     console.log("=== Created zip file: " + resolvedOutPath);
     console.log("=== Done.");
     return process.exit(0);
   }
-  console.error("No files with suffix \"" + suffix$1 + "\" found in configured sources.");
+  console.error("No files with suffix \"" + suffix$1 + "\" (??) found in configured sources.");
   return process.exit(1);
 }
 
