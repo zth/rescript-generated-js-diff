@@ -55,33 +55,7 @@ runs:
         INPUT_TARGET_BRANCH: ${{ inputs.target_branch }}
         GITHUB_BASE_REF: ${{ github.base_ref }}
         GITHUB_HEAD_REF: ${{ github.head_ref }}
-      run: |
-        set -euo pipefail
-        BRANCH_NAME="${CURRENT_BRANCH}"
-        if [ -n "${GITHUB_HEAD_REF:-}" ]; then BRANCH_NAME="$GITHUB_HEAD_REF"; fi
-        # Sanitize branch name for filenames and artifact names
-        BRANCH_SAFE=${BRANCH_NAME//\//-}
-        ZIP_NAME="latest-diff--${BRANCH_SAFE}.zip"
-        OUT_DIR="${RUNNER_TEMP:-$PWD}/rgjd-out"
-        mkdir -p "$OUT_DIR"
-        ZIP_PATH="$OUT_DIR/$ZIP_NAME"
-        echo "branch_name=$BRANCH_NAME" >> "$GITHUB_OUTPUT"
-        echo "branch_safe=$BRANCH_SAFE" >> "$GITHUB_OUTPUT"
-        # Determine target branch: explicit input > PR base > main
-        TARGET_BRANCH="$INPUT_TARGET_BRANCH"
-        if [ -z "$TARGET_BRANCH" ] && [ -n "${GITHUB_BASE_REF:-}" ]; then TARGET_BRANCH="$GITHUB_BASE_REF"; fi
-        if [ -z "$TARGET_BRANCH" ]; then TARGET_BRANCH="main"; fi
-        TARGET_SAFE=${TARGET_BRANCH//\//-}
-        echo "target_branch=$TARGET_BRANCH" >> "$GITHUB_OUTPUT"
-        echo "target_safe=$TARGET_SAFE" >> "$GITHUB_OUTPUT"
-        echo "zip_name=$ZIP_NAME" >> "$GITHUB_OUTPUT"
-        echo "zip_path=$ZIP_PATH" >> "$GITHUB_OUTPUT"
-        # Whether we are on the target branch (skip diffing in that case)
-        if [ "$BRANCH_NAME" = "$TARGET_BRANCH" ]; then
-          echo "is_same_branch=true" >> "$GITHUB_OUTPUT"
-        else
-          echo "is_same_branch=false" >> "$GITHUB_OUTPUT"
-        fi
+      run: bash "${{ github.action_path }}/scripts/setup.sh"
 
     - name: Build zip
       shell: bash
@@ -112,15 +86,7 @@ runs:
       if: ${{ steps.setup.outputs.is_same_branch != 'true' }}
       shell: bash
       working-directory: ${{ github.workspace }}
-      run: |
-        set -euo pipefail
-        PREV_ZIP=$(find .rgjd-cache/prev -type f -name "*.zip" -print -quit || true)
-        if [ -z "$PREV_ZIP" ]; then
-          echo "found=false" >> "$GITHUB_OUTPUT"
-          exit 0
-        fi
-        echo "found=true" >> "$GITHUB_OUTPUT"
-        echo "zip_path=$(realpath "$PREV_ZIP")" >> "$GITHUB_OUTPUT"
+      run: bash "${{ github.action_path }}/scripts/prev_info.sh"
 
     - id: generate_diff
       name: Generate diff HTML
@@ -132,60 +98,7 @@ runs:
         IN_NAME: ${{ inputs.html_artifact_name }}
         CURR_SAFE: ${{ steps.setup.outputs.branch_safe }}
         TGT_SAFE: ${{ steps.setup.outputs.target_safe }}
-      run: |
-        set -euo pipefail
-        CURR_ZIP="${{ steps.setup.outputs.zip_path }}"
-        PREV_ZIP="${{ steps.prev_info.outputs.zip_path }}"
-        WORK="${RUNNER_TEMP:-$PWD}/rgjd-work"
-        mkdir -p "$WORK/prev" "$WORK/curr"
-
-        unzip -q "$PREV_ZIP" -d "$WORK/prev"
-        unzip -q "$CURR_ZIP" -d "$WORK/curr"
-
-        # Run from within $WORK so paths are relative (e.g., src/Foo.res.mjs) and avoid runner absolute paths
-        (
-          cd "$WORK"
-          git -c core.quotepath=false -c color.ui=never diff --no-index \
-            prev curr > diff.patch || true
-        )
-
-        if [ ! -s "$WORK/diff.patch" ]; then
-          echo "has_changes=false" >> "$GITHUB_OUTPUT"
-          exit 0
-        fi
-        # Strip the leading prev/ and curr/ path segments so headers show just repo-relative paths like src/Foo.res.mjs
-        TMP_DIFF="$WORK/diff.tmp.patch"
-        sed -E \
-          -e 's|^(diff --git )a/prev/|\1a/|' \
-          -e 's| b/curr/| b/|' \
-          -e 's|^--- a/prev/|--- a/|' \
-          -e 's|^\+\+\+ b/curr/|+++ b/|' \
-          -e 's|^rename from prev/|rename from |' \
-          -e 's|^rename to curr/|rename to |' \
-          "$WORK/diff.patch" > "$TMP_DIFF" || true
-        mv "$TMP_DIFF" "$WORK/diff.patch"
-
-        STYLE=$(echo "$INPUT_DIFF_STYLE" | tr 'A-Z' 'a-z')
-        if [ "$STYLE" != "side" ] && [ "$STYLE" != "line" ]; then STYLE="side"; fi
-        NAME="$IN_NAME"
-        if [ -z "$NAME" ]; then
-          NAME="latest-diff--${TGT_SAFE}-vs-${CURR_SAFE}.html"
-        fi
-        PATCH_NAME="$NAME"
-        if [[ "$PATCH_NAME" == *.html ]]; then
-          PATCH_NAME="${PATCH_NAME%.html}.patch"
-        else
-          PATCH_NAME="${PATCH_NAME}.patch"
-        fi
-        OUT_HTML="$WORK/$NAME"
-        OUT_PATCH="$WORK/$PATCH_NAME"
-        npx --yes diff2html-cli@5 -i file -s "$STYLE" -F "$OUT_HTML" -- "$WORK/diff.patch"
-        mv "$WORK/diff.patch" "$OUT_PATCH"
-        echo "diff_html_path=$OUT_HTML" >> "$GITHUB_OUTPUT"
-        echo "diff_patch_path=$OUT_PATCH" >> "$GITHUB_OUTPUT"
-        echo "html_name=$NAME" >> "$GITHUB_OUTPUT"
-        echo "patch_name=$PATCH_NAME" >> "$GITHUB_OUTPUT"
-        echo "has_changes=true" >> "$GITHUB_OUTPUT"
+      run: bash "${{ github.action_path }}/scripts/generate_diff.sh" "${{ steps.setup.outputs.zip_path }}" "${{ steps.prev_info.outputs.zip_path }}"
 
     - id: upload_html
       name: Upload diff HTML artifact
@@ -213,25 +126,8 @@ runs:
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         HTML_ART_ID: ${{ steps.upload_html.outputs.artifact-id }}
         PATCH_ART_ID: ${{ steps.upload_patch.outputs.artifact-id }}
-      run: |
-        {
-          echo "### Diff of generated JS for \`$BRANCH\` vs \`$TARGET\`"
-          echo
-          if [ "${{ steps.setup.outputs.is_same_branch }}" = "true" ]; then
-            echo "- On target branch; diff generation skipped."
-          elif [ "${{ steps.prev_info.outputs.found }}" != "true" ]; then
-            echo "- No previous artifact found for target branch; diff HTML was not generated."
-          elif [ "${{ steps.generate_diff.outputs.has_changes }}" != "true" ]; then
-            echo "- No changes detected; diff HTML was not generated."
-          else
-            HTML_URL="$RUN_URL/artifacts/$HTML_ART_ID"
-            PATCH_URL="$RUN_URL/artifacts/$PATCH_ART_ID"
-            echo "- Diff HTML: [open]($HTML_URL)"
-            echo "- Patch file: [open]($PATCH_URL)"
-            echo
-            echo '```diff'
-            head -c 200000 "${{ steps.generate_diff.outputs.diff_patch_path }}" || true
-            echo
-            echo '```'
-          fi
-        } >> "$GITHUB_STEP_SUMMARY"
+        IS_SAME_BRANCH: ${{ steps.setup.outputs.is_same_branch }}
+        PREV_FOUND: ${{ steps.prev_info.outputs.found }}
+        HAS_CHANGES: ${{ steps.generate_diff.outputs.has_changes }}
+        PATCH_PATH: ${{ steps.generate_diff.outputs.diff_patch_path }}
+      run: bash "${{ github.action_path }}/scripts/add_summary.sh"
