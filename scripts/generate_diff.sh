@@ -64,8 +64,13 @@ fi
 OUT_HTML="$WORK/$NAME"
 OUT_PATCH="$WORK/$PATCH_NAME"
 
-npx --yes diff2html-cli@5 -i file -s "$STYLE" -F "$OUT_HTML" -- "$WORK/diff.patch"
+# Use a custom wrapper template to inject meta tags natively via diff2html's --hwt
+# Resolve template path relative to this script directory to avoid relying on env
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WRAPPER_TEMPLATE="${SCRIPT_DIR}/../templates/diff2html-wrapper.html"
+npx --yes diff2html-cli@5 -i file -s "$STYLE" -F "$OUT_HTML" --hwt "$WRAPPER_TEMPLATE" -- "$WORK/diff.patch"
 mv "$WORK/diff.patch" "$OUT_PATCH"
+
 
 echo "diff_html_path=$OUT_HTML" >> "$GITHUB_OUTPUT"
 echo "diff_patch_path=$OUT_PATCH" >> "$GITHUB_OUTPUT"

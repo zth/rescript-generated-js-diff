@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow, noarchive" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Diff</title>
+
+    <!-- Optional: a baseline highlight.js theme before diff2html css -->
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css"
+    />
+
+    <!--diff2html-css-->
+    <!--diff2html-js-ui-->
+    <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        const targetElement = document.getElementById("diff");
+        const diff2htmlUi = new Diff2HtmlUI(targetElement);
+        //diff2html-fileListToggle
+        //diff2html-synchronisedScroll
+        //diff2html-highlightCode
+      });
+    </script>
+    <style>
+      body {
+        margin: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="diff">
+      <!--diff2html-diff-->
+    </div>
+  </body>
+</html>
