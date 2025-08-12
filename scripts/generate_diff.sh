@@ -38,7 +38,6 @@ sed -E \
   -e 's|^\+\+\+ b/curr/|+++ b/|' \
   -e 's|^rename from prev/|rename from |' \
   -e 's|^rename to curr/|rename to |' \
-  # Strip git-style a/ and b/ prefixes entirely
   -e 's|^(diff --git )a/|\1|' \
   -e 's| b/| |' \
   -e 's|^--- a/|--- |' \
@@ -64,8 +63,6 @@ fi
 OUT_HTML="$WORK/$NAME"
 OUT_PATCH="$WORK/$PATCH_NAME"
 
-# Use a custom wrapper template to inject meta tags natively via diff2html's --hwt
-# Resolve template path relative to this script directory to avoid relying on env
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WRAPPER_TEMPLATE="${SCRIPT_DIR}/../templates/diff2html-wrapper.html"
 npx --yes diff2html-cli@5 -i file -s "$STYLE" -F "$OUT_HTML" --hwt "$WRAPPER_TEMPLATE" -- "$WORK/diff.patch"
