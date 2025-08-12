@@ -1,0 +1,38 @@
+name: Cleanup deployed diffs on PR merge
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    name: Remove PR diff folder from gh-pages
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Compute destination dir
+        id: compute
+        run: |
+          set -euo pipefail
+          BRANCH_NAME="${{ github.event.pull_request.head.ref }}"
+          DEST_DIR="diffs/${BRANCH_NAME}"
+          echo "branch=${BRANCH_NAME}" >> "$GITHUB_OUTPUT"
+          echo "dest_dir=${DEST_DIR}" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare empty publish directory
+        run: |
+          set -euo pipefail
+          rm -rf cleanup_tmp
+          mkdir -p cleanup_tmp
+
+      - name: Remove PR diffs using gh-pages action
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: cleanup_tmp
+          destination_dir: ${{ steps.compute.outputs.dest_dir }}
+          keep_files: true

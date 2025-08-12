@@ -10,7 +10,8 @@ on:
 
 permissions:
   actions: read
-  contents: read
+  contents: write
+  pull-requests: write
 
 jobs:
   build-and-diff:
@@ -42,3 +43,60 @@ jobs:
           echo "Zip: ${{ steps.rgjd.outputs.zip_path }}"
           echo "Diff HTML: ${{ steps.rgjd.outputs.diff_html_path }}"
           echo "Diff patch: ${{ steps.rgjd.outputs.diff_patch_path }}"
+
+      - name: Compute diff subpath
+        id: compute
+        run: |
+          set -euo pipefail
+          BRANCH_NAME="${{ github.head_ref || github.ref_name }}"
+          COMMIT_SHA="${{ github.sha }}"
+          SUBDIR="diffs/${BRANCH_NAME}/${COMMIT_SHA}"
+          SUBPATH="${SUBDIR}/"
+          echo "branch=${BRANCH_NAME}" >> "$GITHUB_OUTPUT"
+          echo "commit=${COMMIT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "subpath=${SUBPATH}" >> "$GITHUB_OUTPUT"
+          echo "subdir=${SUBDIR}" >> "$GITHUB_OUTPUT"
+
+      - name: Check for diff
+        id: check_diff
+        run: |
+          set -euo pipefail
+          PATCH_PATH="${{ steps.rgjd.outputs.diff_patch_path }}"
+          if [ -s "$PATCH_PATH" ]; then
+            echo "has_diff=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No diff detected (empty patch). Skipping deployment."
+            echo "has_diff=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Prepare publish directory
+        if: steps.check_diff.outputs.has_diff == 'true'
+        run: |
+          set -euo pipefail
+          rm -rf publish_tmp
+          mkdir -p publish_tmp
+          cp "${{ steps.rgjd.outputs.diff_html_path }}" "publish_tmp/index.html"
+
+      - name: Deploy to GitHub Pages (keep files)
+        if: steps.check_diff.outputs.has_diff == 'true'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: publish_tmp
+          destination_dir: ${{ steps.compute.outputs.subdir }}
+          keep_files: true
+
+      - name: Output deployed path
+        if: steps.check_diff.outputs.has_diff == 'true'
+        run: echo "Diff path: /${{ steps.compute.outputs.subpath }}"
+
+      - name: Sticky PR comment with latest diff
+        if: github.event_name == 'pull_request' && steps.check_diff.outputs.has_diff == 'true'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: rescript-generated-js-diff
+          message: |
+            Latest generated JS diff for `${{ steps.compute.outputs.branch }}` at `${{ steps.compute.outputs.commit }}`:
+
+            - URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/${{ steps.compute.outputs.subpath }}
