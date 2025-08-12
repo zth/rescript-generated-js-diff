@@ -31,9 +31,7 @@ set -euo pipefail
       echo "#### Inline diff"
     fi
     echo '```diff'
-    # Hide file header lines in inline summary for readability
-    head -c "${MAX_BYTES}" "${PATCH_PATH}" \
-      | sed -E '/^(diff --git|index [0-9a-f]+\.[0-9a-f]+|--- |\+\+\+ |rename from |rename to )/d' || true
+    head -c "${MAX_BYTES}" "${PATCH_PATH}"
     echo
     echo '```'
   fi
